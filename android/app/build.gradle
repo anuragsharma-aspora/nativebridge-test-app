@@ -79,8 +79,8 @@ android {
         applicationId "com.nativebridge.io"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10003
-        versionName "1.0.3"
+        versionCode 10004
+        versionName "1.0.4"
         missingDimensionStrategy 'react-native-camera', 'general'
     }
     signingConfigs {
