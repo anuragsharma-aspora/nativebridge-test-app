@@ -52,7 +52,12 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
-          cache: 'gradle'
+
+      # Setup Gradle
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: false
 
       # Decode and setup keystore from secrets
       - name: Setup Android Keystore
@@ -102,12 +107,25 @@ jobs:
 
           echo "Updated to versionCode: $VERSION_CODE, versionName: $VERSION"
 
+      # Make gradlew executable
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      # Validate Gradle wrapper
+      - name: Validate Gradle wrapper
+        uses: gradle/wrapper-validation-action@v2
+
+      # Clean Gradle cache
+      - name: Clean Gradle Cache
+        run: |
+          cd android
+          ./gradlew clean --stacktrace
+
       # Build Android Release APK
       - name: Build Android Release APK
         run: |
           cd android
-          chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease --stacktrace --info
 
       # Rename APK with version
       - name: Rename APK with version
