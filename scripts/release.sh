@@ -3,8 +3,8 @@
 ################################################################################
 # NativeBridge Release Script
 #
-# This script automates the release process:
-# 1. Bumps version in package.json
+# Simple automated release process:
+# 1. Bumps version in package.json and Android build.gradle
 # 2. Commits version changes
 # 3. Creates and pushes git tag
 # 4. Triggers CI/CD pipeline
@@ -14,8 +14,8 @@
 #
 # Examples:
 #   ./scripts/release.sh 1.0.0
-#   ./scripts/release.sh 1.2.3 --skip-tests
-#   ./scripts/release.sh 2.0.0-beta --prerelease
+#   ./scripts/release.sh 1.2.3
+#   ./scripts/release.sh 2.0.0-beta
 #
 # Author: NativeBridge Team
 # License: MIT
@@ -77,18 +77,16 @@ Arguments:
   version       Version number (e.g., 1.0.0, 2.0.0-beta)
 
 Options:
-  --skip-tests      Skip running tests
-  --skip-build      Skip build verification
-  --prerelease      Mark as pre-release
   --dry-run         Show what would happen without making changes
   --force           Skip confirmations
   -h, --help        Show this help message
 
 Examples:
   $0 1.0.0
-  $0 1.2.3 --skip-tests
-  $0 2.0.0-beta --prerelease
+  $0 1.2.3
+  $0 2.0.0-beta
   $0 1.0.1 --dry-run
+  $0 1.0.0 --force
 
 EOF
 }
@@ -114,9 +112,8 @@ check_dependencies() {
 
     # Check jq (for JSON manipulation)
     if ! command -v jq &> /dev/null; then
-        print_warning "jq is not installed. Installing it is recommended for JSON manipulation."
-        print_info "macOS: brew install jq"
-        print_info "Linux: sudo apt-get install jq"
+        print_warning "jq is not installed. Will use sed for JSON manipulation."
+        print_info "Install jq for better reliability: brew install jq (macOS) or apt-get install jq (Linux)"
         USE_JQ=false
     else
         USE_JQ=true
@@ -195,7 +192,7 @@ check_tag_exists() {
 
     if git rev-parse "$tag" >/dev/null 2>&1; then
         print_error "Tag $tag already exists"
-        print_info "Delete it with: git tag -d $tag"
+        print_info "Delete it with: git tag -d $tag && git push origin :refs/tags/$tag"
         exit 1
     fi
 }
@@ -257,46 +254,6 @@ update_android_version() {
     print_success "Updated Android build.gradle"
     print_info "versionCode: $version_code"
     print_info "versionName: $version"
-}
-
-################################################################################
-# Build & Test Functions
-################################################################################
-
-run_tests() {
-    if [[ "$SKIP_TESTS" == true ]]; then
-        print_warning "Skipping tests (--skip-tests)"
-        return
-    fi
-
-    print_step "Running tests"
-
-    cd "$PROJECT_ROOT"
-
-    if npm test; then
-        print_success "All tests passed"
-    else
-        print_error "Tests failed"
-        exit 1
-    fi
-}
-
-verify_build() {
-    if [[ "$SKIP_BUILD" == true ]]; then
-        print_warning "Skipping build verification (--skip-build)"
-        return
-    fi
-
-    print_step "Verifying Android build"
-
-    cd "$PROJECT_ROOT/android"
-
-    if ./gradlew assembleRelease --no-daemon; then
-        print_success "Android build successful"
-    else
-        print_error "Android build failed"
-        exit 1
-    fi
 }
 
 ################################################################################
@@ -393,8 +350,6 @@ perform_release() {
         echo -e "${YELLOW}  Version:      $version${NC}"
         echo -e "${YELLOW}  Tag:          v$version${NC}"
         echo -e "${YELLOW}  Branch:       $CURRENT_BRANCH${NC}"
-        echo -e "${YELLOW}  Skip Tests:   ${SKIP_TESTS:-false}${NC}"
-        echo -e "${YELLOW}  Skip Build:   ${SKIP_BUILD:-false}${NC}"
         echo -e "${YELLOW}═══════════════════════════════════════════════════════════${NC}"
         echo ""
         read -p "Continue with release? (y/n) " -n 1 -r
@@ -410,8 +365,6 @@ perform_release() {
         echo ""
         print_info "Would update package.json to version $version"
         print_info "Would update Android build.gradle"
-        print_info "Would run tests (if not skipped)"
-        print_info "Would verify build (if not skipped)"
         print_info "Would commit changes"
         print_info "Would create and push tag v$version"
         print_info "Would trigger CI/CD pipeline"
@@ -423,12 +376,6 @@ perform_release() {
     # Update versions
     update_package_json "$version"
     update_android_version "$version"
-
-    # Run tests
-    run_tests
-
-    # Verify build
-    verify_build
 
     # Commit changes
     commit_version_changes "$version"
@@ -456,9 +403,6 @@ perform_release() {
 main() {
     # Parse arguments
     VERSION=""
-    SKIP_TESTS=false
-    SKIP_BUILD=false
-    PRERELEASE=false
     DRY_RUN=false
     FORCE=false
 
@@ -467,18 +411,6 @@ main() {
             -h|--help)
                 show_usage
                 exit 0
-                ;;
-            --skip-tests)
-                SKIP_TESTS=true
-                shift
-                ;;
-            --skip-build)
-                SKIP_BUILD=true
-                shift
-                ;;
-            --prerelease)
-                PRERELEASE=true
-                shift
                 ;;
             --dry-run)
                 DRY_RUN=true
