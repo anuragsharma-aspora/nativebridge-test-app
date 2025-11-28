@@ -270,6 +270,19 @@ commit_version_changes() {
     # Add changed files
     git add "$PACKAGE_JSON" "$ANDROID_BUILD_GRADLE"
 
+    # Check if there are changes to commit
+    if git diff --cached --quiet; then
+        print_error "No changes to commit!"
+        print_warning "The version $version is already set in package.json and build.gradle"
+        print_info "Current version in package.json: $(grep '"version"' "$PACKAGE_JSON" | sed 's/.*"version": "\(.*\)".*/\1/')"
+        echo ""
+        print_info "Try a different version, for example:"
+        print_info "  ./scripts/release.sh 1.0.1"
+        print_info "  ./scripts/release.sh 1.1.0"
+        print_info "  ./scripts/release.sh 2.0.0"
+        exit 1
+    fi
+
     # Commit
     git commit -m "chore: bump version to $version
 
