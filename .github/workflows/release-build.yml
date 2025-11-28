@@ -107,6 +107,9 @@ jobs:
       # Build JS bundle first (this bypasses the Kotlin plugin compilation)
       - name: Build JavaScript Bundle
         run: |
+          # Create assets directory if it doesn't exist
+          mkdir -p android/app/src/main/assets
+
           npx react-native bundle \
             --platform android \
             --dev false \
