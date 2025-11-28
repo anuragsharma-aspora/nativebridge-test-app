@@ -1,0 +1,151 @@
+# OSX
+#
+.DS_Store
+
+# Xcode
+#
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+**/.xcode.env.local
+
+# Android/IntelliJ
+#
+build/
+.idea
+.gradle
+local.properties
+*.iml
+*.hprof
+.cxx/
+*.keystore
+!debug.keystore
+# IMPORTANT: Never commit release keystores
+android/app/nativebridge-release.keystore
+android/app/*-release.keystore
+android/app/*-production.keystore
+
+# node.js
+#
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# fastlane
+#
+# It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
+# screenshots whenever they are needed.
+# For more information about the recommended setup visit:
+# https://docs.fastlane.tools/best-practices/source-control/
+
+**/fastlane/report.xml
+**/fastlane/Preview.html
+**/fastlane/screenshots
+**/fastlane/test_output
+
+# Bundle artifact
+*.jsbundle
+
+# Ruby / CocoaPods
+**/Pods/
+/vendor/bundle/
+
+# Temporary files created by Metro to check the health of the file watcher
+.metro-health-check*
+
+# testing
+/coverage
+
+# Yarn
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# Editor directories and files
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+.metadata
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# SECURITY: Keystore credentials and sensitive config
+# Never commit files containing passwords or signing credentials
+gradle.properties.secret
+keystore.properties
+key.properties
+release.properties
+signing.properties
+**/signing-config.json
+**/keystore-info.txt
+
+# WARNING: KEYSTORE_INFO.md contains passwords - only commit to PRIVATE repos!
+# Uncomment the line below if you want to exclude it from git:
+# KEYSTORE_INFO.md
+
+# Backup files
+*.bak
+*_backup.*
+App_backup.tsx
+
+# Build artifacts (APKs are large binary files)
+builds/*.apk
+builds/*.aab
+*.apk
+*.aab
+
+# Android build outputs
+android/app/build/
+android/app/release/
+android/build/
+android/.gradle/
+
+# Metro bundler cache
+.metro/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Buck
+buck-out/
+.buckconfig.local
+.buckd/
+.buckversion
+.fakebuckversion
+
+# React Native
+.react-native/
+
+# Expo (if used)
+.expo/
+.expo-shared/
+
+# Watchman
+.watchmanconfig
