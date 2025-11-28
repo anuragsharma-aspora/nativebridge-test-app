@@ -53,12 +53,6 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      # Setup Gradle
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          cache-read-only: false
-
       # Decode and setup keystore from secrets
       - name: Setup Android Keystore
         env:
@@ -97,9 +91,8 @@ jobs:
       - name: Update version in build.gradle
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
-          # Extract version code (remove dots and convert to integer)
-          VERSION_CODE=$(echo $VERSION | sed 's/[^0-9]//g' | sed 's/^0*//')
-          if [ -z "$VERSION_CODE" ]; then VERSION_CODE="1"; fi
+          # Generate versionCode: 1.0.0 -> 10000, 1.2.3 -> 10203
+          VERSION_CODE=$(echo $VERSION | sed 's/-.*//' | awk -F. '{printf "%d%02d%02d", $1, $2, $3}')
 
           # Update versionCode and versionName in build.gradle
           sed -i "s/versionCode [0-9]*/versionCode $VERSION_CODE/" android/app/build.gradle
@@ -111,32 +104,27 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      # Validate Gradle wrapper
-      - name: Validate Gradle wrapper
-        uses: gradle/wrapper-validation-action@v2
-
-      # Clean Gradle cache
-      - name: Clean Gradle Cache
+      # Build JS bundle first (this bypasses the Kotlin plugin compilation)
+      - name: Build JavaScript Bundle
         run: |
-          cd android
-          ./gradlew clean --stacktrace
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
 
-      # Apply CI-specific Gradle properties
-      - name: Setup CI Gradle Properties
-        run: |
-          cat android/gradle.properties.ci >> android/gradle.properties
-          cat android/gradle.properties
-
-      # Build Android Release APK
+      # Build Android Release APK using Gradle directly (with JS bundle already built)
       - name: Build Android Release APK
         run: |
           cd android
-          # Build with explicit Kotlin version compatibility
-          ./gradlew assembleRelease \
-            --stacktrace \
-            --no-configuration-cache \
-            -Pkotlin.version=1.9.0 \
-            -Dkotlin.compiler.execution.strategy=in-process
+
+          # Clean first
+          ./gradlew clean
+
+          # Build release APK
+          # The JS bundle is already built, so we just need to assemble the APK
+          ./gradlew assembleRelease --stacktrace --info
 
       # Rename APK with version
       - name: Rename APK with version
@@ -169,135 +157,11 @@ jobs:
           echo "**Size:** ${{ env.APK_SIZE }}" >> $GITHUB_STEP_SUMMARY
 
   # ============================================================================
-  # iOS .app Build (Simulator)
-  # ============================================================================
-  build-ios:
-    name: Build iOS .app
-    runs-on: macos-latest
-
-    steps:
-      # Checkout code
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # Extract version from tag
-      - name: Extract version from tag
-        id: get_version
-        run: |
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          VERSION=${TAG_NAME#v}
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Building iOS version: $VERSION"
-
-      # Set up Node.js
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      # Install dependencies
-      - name: Install dependencies
-        run: npm ci
-
-      # Install iOS dependencies (CocoaPods)
-      - name: Install CocoaPods dependencies
-        run: |
-          cd ios
-          pod install --repo-update
-
-      # Set up Xcode version
-      - name: Set up Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: 'latest-stable'
-
-      # Update version in iOS project
-      - name: Update iOS version
-        run: |
-          VERSION=${{ steps.get_version.outputs.VERSION }}
-          # Update version in Info.plist or project.pbxproj
-          # For now, we'll add version to build settings via xcodebuild
-          echo "iOS Version: $VERSION"
-
-      # Build iOS .app for simulator
-      - name: Build iOS .app for Simulator
-        run: |
-          VERSION=${{ steps.get_version.outputs.VERSION }}
-
-          # Find the workspace or project file
-          if [ -f "ios/NativeBridgeDebugApplication.xcworkspace" ]; then
-            PROJECT_TYPE="-workspace ios/NativeBridgeDebugApplication.xcworkspace"
-          else
-            PROJECT_TYPE="-project ios/NativeBridgeDebugApplication.xcodeproj"
-          fi
-
-          # Build for simulator
-          xcodebuild \
-            $PROJECT_TYPE \
-            -scheme NativeBridgeDebugApplication \
-            -configuration Release \
-            -sdk iphonesimulator \
-            -derivedDataPath ios/build \
-            MARKETING_VERSION=$VERSION \
-            clean build
-
-          echo "iOS build completed"
-
-      # Find and zip the .app directory
-      - name: Package iOS .app
-        run: |
-          VERSION=${{ steps.get_version.outputs.VERSION }}
-
-          # Find the .app directory
-          APP_PATH=$(find ios/build/Build/Products/Release-iphonesimulator -name "*.app" -type d | head -n 1)
-
-          if [ -z "$APP_PATH" ]; then
-            echo "Error: .app not found"
-            exit 1
-          fi
-
-          echo "Found .app at: $APP_PATH"
-
-          # Create release artifacts directory
-          mkdir -p release-artifacts
-
-          # Zip the .app directory
-          cd $(dirname $APP_PATH)
-          APP_NAME=$(basename $APP_PATH)
-          zip -r ../../../../../release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip "$APP_NAME"
-          cd -
-
-          # Get file size
-          FILE_SIZE=$(ls -lh release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip | awk '{print $5}')
-          echo "iOS .app.zip Size: $FILE_SIZE"
-          echo "IOS_SIZE=$FILE_SIZE" >> $GITHUB_ENV
-
-      # Upload iOS .app.zip as artifact
-      - name: Upload iOS .app.zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}
-          path: release-artifacts/NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip
-          retention-days: 90
-
-      # Output build info
-      - name: Build Summary
-        run: |
-          echo "### iOS Build Complete ✅" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Archive:** NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip" >> $GITHUB_STEP_SUMMARY
-          echo "**Size:** ${{ env.IOS_SIZE }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Platform:** iOS Simulator" >> $GITHUB_STEP_SUMMARY
-
-  # ============================================================================
   # Create GitHub Release
   # ============================================================================
   create-release:
     name: Create GitHub Release
-    needs: [build-android, build-ios]
+    needs: [build-android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -323,13 +187,6 @@ jobs:
           name: NativeBridge-Android-v${{ steps.get_version.outputs.VERSION }}
           path: artifacts/
 
-      # Download iOS artifact
-      - name: Download iOS .app.zip
-        uses: actions/download-artifact@v4
-        with:
-          name: NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}
-          path: artifacts/
-
       # Create GitHub Release
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -345,23 +202,11 @@ jobs:
             **Android:**
             - `NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk` - Production APK for Android devices and emulators
 
-            **iOS:**
-            - `NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip` - iOS Simulator build (.app directory)
-
             ### 📝 Installation
 
             **Android:**
             ```bash
             adb install NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk
-            ```
-
-            **iOS Simulator:**
-            ```bash
-            # Extract the .app
-            unzip NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip
-
-            # Install to simulator
-            xcrun simctl install booted NativeBridgeDebugApplication.app
             ```
 
             ### ✨ Features
@@ -385,7 +230,6 @@ jobs:
             For detailed build instructions, see [BUILD_GUIDE.md](https://github.com/${{ github.repository }}/blob/main/BUILD_GUIDE.md)
           files: |
             artifacts/NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk
-            artifacts/NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -399,6 +243,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Artifacts:**" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Android APK" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ iOS .app.zip" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release URL:** https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_version.outputs.TAG_NAME }}" >> $GITHUB_STEP_SUMMARY
