@@ -1,0 +1,18 @@
+# CI-specific gradle properties
+# This file is loaded in GitHub Actions to workaround build issues
+
+# Disable Kotlin warnings as errors
+kotlin.allWarningsAsErrors=false
+
+# Increase memory for CI builds
+org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
+
+# Enable parallel builds
+org.gradle.parallel=true
+org.gradle.configureondemand=true
+
+# Enable caching
+org.gradle.caching=true
+
+# Daemon settings for CI
+org.gradle.daemon=false
