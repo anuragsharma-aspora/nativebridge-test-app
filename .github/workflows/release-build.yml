@@ -1,0 +1,375 @@
+name: Release Build
+
+# Trigger on release tags (e.g., v1.0.0, v1.2.3, v2.0.0-beta)
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  NODE_VERSION: '18'
+  JAVA_VERSION: '17'
+
+jobs:
+  # ============================================================================
+  # Android APK Build
+  # ============================================================================
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Extract version from tag
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          # Get tag name (e.g., v1.0.0)
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          # Remove 'v' prefix to get version (e.g., 1.0.0)
+          VERSION=${TAG_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      # Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      # Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # Set up Java/JDK for Android build
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      # Decode and setup keystore from secrets
+      - name: Setup Android Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          # Create keystore directory
+          mkdir -p android/app
+
+          # If keystore secret exists, decode it; otherwise use local keystore
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Using keystore from GitHub Secrets"
+            echo $KEYSTORE_BASE64 | base64 -d > android/app/release.keystore
+            KEYSTORE_FILE="release.keystore"
+          else
+            echo "Using local keystore (development)"
+            KEYSTORE_FILE="nativebridge-release.keystore"
+            KEYSTORE_PASSWORD="nativebridge2025"
+            KEY_ALIAS="nativebridge-key"
+            KEY_PASSWORD="nativebridge2025"
+          fi
+
+          # Create gradle.properties with signing config
+          cat >> android/gradle.properties << EOF
+
+          # Release signing configuration (from CI/CD)
+          MYAPP_RELEASE_STORE_FILE=$KEYSTORE_FILE
+          MYAPP_RELEASE_KEY_ALIAS=${KEY_ALIAS:-nativebridge-key}
+          MYAPP_RELEASE_STORE_PASSWORD=${KEYSTORE_PASSWORD:-nativebridge2025}
+          MYAPP_RELEASE_KEY_PASSWORD=${KEY_PASSWORD:-nativebridge2025}
+          EOF
+
+      # Update version in build.gradle
+      - name: Update version in build.gradle
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          # Extract version code (remove dots and convert to integer)
+          VERSION_CODE=$(echo $VERSION | sed 's/[^0-9]//g' | sed 's/^0*//')
+          if [ -z "$VERSION_CODE" ]; then VERSION_CODE="1"; fi
+
+          # Update versionCode and versionName in build.gradle
+          sed -i "s/versionCode [0-9]*/versionCode $VERSION_CODE/" android/app/build.gradle
+          sed -i "s/versionName \".*\"/versionName \"$VERSION\"/" android/app/build.gradle
+
+          echo "Updated to versionCode: $VERSION_CODE, versionName: $VERSION"
+
+      # Build Android Release APK
+      - name: Build Android Release APK
+        run: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      # Rename APK with version
+      - name: Rename APK with version
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          mkdir -p release-artifacts
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             release-artifacts/NativeBridge-v${VERSION}.apk
+
+          # Get file size
+          FILE_SIZE=$(ls -lh release-artifacts/NativeBridge-v${VERSION}.apk | awk '{print $5}')
+          echo "APK Size: $FILE_SIZE"
+          echo "APK_SIZE=$FILE_SIZE" >> $GITHUB_ENV
+
+      # Upload APK as artifact
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NativeBridge-Android-v${{ steps.get_version.outputs.VERSION }}
+          path: release-artifacts/NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk
+          retention-days: 90
+
+      # Output build info
+      - name: Build Summary
+        run: |
+          echo "### Android Build Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**APK:** NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** ${{ env.APK_SIZE }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # iOS .app Build (Simulator)
+  # ============================================================================
+  build-ios:
+    name: Build iOS .app
+    runs-on: macos-latest
+
+    steps:
+      # Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Extract version from tag
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Building iOS version: $VERSION"
+
+      # Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      # Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # Install iOS dependencies (CocoaPods)
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          pod install --repo-update
+
+      # Set up Xcode version
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest-stable'
+
+      # Update version in iOS project
+      - name: Update iOS version
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          # Update version in Info.plist or project.pbxproj
+          # For now, we'll add version to build settings via xcodebuild
+          echo "iOS Version: $VERSION"
+
+      # Build iOS .app for simulator
+      - name: Build iOS .app for Simulator
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+
+          # Find the workspace or project file
+          if [ -f "ios/NativeBridgeDebugApplication.xcworkspace" ]; then
+            PROJECT_TYPE="-workspace ios/NativeBridgeDebugApplication.xcworkspace"
+          else
+            PROJECT_TYPE="-project ios/NativeBridgeDebugApplication.xcodeproj"
+          fi
+
+          # Build for simulator
+          xcodebuild \
+            $PROJECT_TYPE \
+            -scheme NativeBridgeDebugApplication \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath ios/build \
+            MARKETING_VERSION=$VERSION \
+            clean build
+
+          echo "iOS build completed"
+
+      # Find and zip the .app directory
+      - name: Package iOS .app
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+
+          # Find the .app directory
+          APP_PATH=$(find ios/build/Build/Products/Release-iphonesimulator -name "*.app" -type d | head -n 1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: .app not found"
+            exit 1
+          fi
+
+          echo "Found .app at: $APP_PATH"
+
+          # Create release artifacts directory
+          mkdir -p release-artifacts
+
+          # Zip the .app directory
+          cd $(dirname $APP_PATH)
+          APP_NAME=$(basename $APP_PATH)
+          zip -r ../../../../../release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip "$APP_NAME"
+          cd -
+
+          # Get file size
+          FILE_SIZE=$(ls -lh release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip | awk '{print $5}')
+          echo "iOS .app.zip Size: $FILE_SIZE"
+          echo "IOS_SIZE=$FILE_SIZE" >> $GITHUB_ENV
+
+      # Upload iOS .app.zip as artifact
+      - name: Upload iOS .app.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}
+          path: release-artifacts/NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip
+          retention-days: 90
+
+      # Output build info
+      - name: Build Summary
+        run: |
+          echo "### iOS Build Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Archive:** NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** ${{ env.IOS_SIZE }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** iOS Simulator" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Create GitHub Release
+  # ============================================================================
+  create-release:
+    name: Create GitHub Release
+    needs: [build-android, build-ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Extract version from tag
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+
+      # Download Android artifact
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: NativeBridge-Android-v${{ steps.get_version.outputs.VERSION }}
+          path: artifacts/
+
+      # Download iOS artifact
+      - name: Download iOS .app.zip
+        uses: actions/download-artifact@v4
+        with:
+          name: NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}
+          path: artifacts/
+
+      # Create GitHub Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.get_version.outputs.TAG_NAME }}
+          draft: false
+          prerelease: ${{ contains(steps.get_version.outputs.TAG_NAME, 'beta') || contains(steps.get_version.outputs.TAG_NAME, 'alpha') }}
+          body: |
+            ## NativeBridge Release ${{ steps.get_version.outputs.VERSION }}
+
+            ### 📦 Downloads
+
+            **Android:**
+            - `NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk` - Production APK for Android devices and emulators
+
+            **iOS:**
+            - `NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip` - iOS Simulator build (.app directory)
+
+            ### 📝 Installation
+
+            **Android:**
+            ```bash
+            adb install NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk
+            ```
+
+            **iOS Simulator:**
+            ```bash
+            # Extract the .app
+            unzip NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip
+
+            # Install to simulator
+            xcrun simctl install booted NativeBridgeDebugApplication.app
+            ```
+
+            ### ✨ Features
+            - UI Components testing
+            - Network Operations testing
+            - Performance testing
+            - Permissions testing
+            - Storage operations
+            - File operations
+            - Biometric authentication testing
+            - QR Code scanning
+            - Comprehensive logging
+
+            ### 📋 Build Information
+            - **Built on:** ${{ github.event.repository.updated_at }}
+            - **Commit:** ${{ github.sha }}
+            - **Tag:** ${{ steps.get_version.outputs.TAG_NAME }}
+
+            ---
+
+            For detailed build instructions, see [BUILD_GUIDE.md](https://github.com/${{ github.repository }}/blob/main/BUILD_GUIDE.md)
+          files: |
+            artifacts/NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk
+            artifacts/NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Final summary
+      - name: Release Summary
+        run: |
+          echo "### 🎉 Release Created Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ steps.get_version.outputs.TAG_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifacts:**" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Android APK" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ iOS .app.zip" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release URL:** https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_version.outputs.TAG_NAME }}" >> $GITHUB_STEP_SUMMARY
