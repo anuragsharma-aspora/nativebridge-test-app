@@ -146,7 +146,7 @@ The upload step is configured as follows:
   env:
     NATIVEBRIDGE_API_KEY: ${{ secrets.NATIVEBRIDGE_API_KEY }}
   run: |
-    curl -X POST https://dev.api.nativebridge.io/v1/application \
+    curl -X POST https://api.nativebridge.io/v1/application \
       -H "X-Api-Key: $NATIVEBRIDGE_API_KEY" \
       -F "file=@release-artifacts/NativeBridge-v${VERSION}.apk" \
       -F "accessType=public" \

@@ -41,7 +41,7 @@ The API integration automatically uploads your APK and generates a **magic link*
 
 ### 3. Understanding the API
 
-**Base URL:** `https://dev.api.nativebridge.io`
+**Base URL:** `https://api.nativebridge.io`
 
 **Endpoint:** `POST /v1/application`
 
@@ -136,7 +136,7 @@ jobs:
           APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
 
           # Upload to NativeBridge
-          RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+          RESPONSE=$(curl -X POST https://api.nativebridge.io/v1/application \
             -H "X-Api-Key: $NATIVEBRIDGE_API_KEY" \
             -F "file=@$APK_PATH" \
             -F "accessType=public" \
@@ -172,7 +172,7 @@ jobs:
 ```yaml
 - name: Upload to NativeBridge (Private)
   run: |
-    curl -X POST https://dev.api.nativebridge.io/v1/application \
+    curl -X POST https://api.nativebridge.io/v1/application \
       -H "X-Api-Key: ${{ secrets.NATIVEBRIDGE_API_KEY }}" \
       -F "file=@$APK_PATH" \
       -F "accessType=private" \
@@ -221,7 +221,7 @@ deploy_nativebridge:
   image: curlimages/curl:latest
   script:
     - |
-      RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+      RESPONSE=$(curl -X POST https://api.nativebridge.io/v1/application \
         -H "X-Api-Key: ${NATIVEBRIDGE_API_KEY}" \
         -F "file=@android/app/build/outputs/apk/release/app-release.apk" \
         -F "accessType=public" \
@@ -289,7 +289,7 @@ pipeline {
                     def apkPath = 'android/app/build/outputs/apk/release/app-release.apk'
 
                     sh """
-                        RESPONSE=\$(curl -X POST https://dev.api.nativebridge.io/v1/application \\
+                        RESPONSE=\$(curl -X POST https://api.nativebridge.io/v1/application \\
                             -H "X-Api-Key: ${NATIVEBRIDGE_API_KEY}" \\
                             -F "file=@${apkPath}" \\
                             -F "accessType=public" \\
@@ -363,7 +363,7 @@ jobs:
           command: |
             APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
 
-            RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+            RESPONSE=$(curl -X POST https://api.nativebridge.io/v1/application \
               -H "X-Api-Key: $NATIVEBRIDGE_API_KEY" \
               -F "file=@$APK_PATH" \
               -F "accessType=public" \
@@ -437,7 +437,7 @@ workflows:
 
                 echo "📤 Uploading to NativeBridge..."
 
-                RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+                RESPONSE=$(curl -X POST https://api.nativebridge.io/v1/application \
                   -H "X-Api-Key: $NATIVEBRIDGE_API_KEY" \
                   -F "file=@$APK_PATH" \
                   -F "accessType=public" \
@@ -505,7 +505,7 @@ steps:
 
       echo "📤 Uploading to NativeBridge..."
 
-      RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+      RESPONSE=$(curl -X POST https://api.nativebridge.io/v1/application \
         -H "X-Api-Key: $(NATIVEBRIDGE_API_KEY)" \
         -F "file=@$APK_PATH" \
         -F "accessType=public" \
@@ -578,7 +578,7 @@ after_success:
 
     echo "📤 Uploading to NativeBridge..."
 
-    RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+    RESPONSE=$(curl -X POST https://api.nativebridge.io/v1/application \
       -H "X-Api-Key: $NATIVEBRIDGE_API_KEY" \
       -F "file=@$APK_PATH" \
       -F "accessType=public" \
@@ -618,7 +618,7 @@ set -e
 # Configuration
 API_KEY="${NATIVEBRIDGE_API_KEY}"
 APK_PATH="path/to/your/app-release.apk"
-BASE_URL="https://dev.api.nativebridge.io"
+BASE_URL="https://api.nativebridge.io"
 
 # Validate API key
 if [ -z "$API_KEY" ]; then
@@ -844,4 +844,4 @@ Use `create_new_app` for separate environments:
 
 **Last Updated:** 2025-11-29
 **API Version:** v1
-**Base URL:** `https://dev.api.nativebridge.io`
+**Base URL:** `https://api.nativebridge.io`
