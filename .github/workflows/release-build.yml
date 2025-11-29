@@ -104,42 +104,56 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      # Build JS bundle first (this bypasses the Kotlin plugin compilation)
-      - name: Build JavaScript Bundle
+      # Patch React Native Gradle Plugin to disable warnings as errors
+      - name: Patch React Native Gradle Plugin
         run: |
-          # Create assets directory if it doesn't exist
-          mkdir -p android/app/src/main/assets
+          # Find and patch the build.gradle.kts file to force allWarningsAsErrors = false
+          PLUGIN_BUILD_FILE="node_modules/@react-native/gradle-plugin/react-native-gradle-plugin/build.gradle.kts"
 
-          npx react-native bundle \
-            --platform android \
-            --dev false \
-            --entry-file index.js \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res
+          if [ -f "$PLUGIN_BUILD_FILE" ]; then
+            echo "Patching React Native Gradle Plugin build configuration..."
 
-      # Build Android Release APK using Gradle directly (with JS bundle already built)
+            # Force allWarningsAsErrors to false using sed
+            sed -i 's/allWarningsAsErrors = true/allWarningsAsErrors = false/g' "$PLUGIN_BUILD_FILE"
+
+            # Also add it if missing - insert before the closing brace of kotlinOptions
+            if ! grep -q "allWarningsAsErrors" "$PLUGIN_BUILD_FILE"; then
+              sed -i '/kotlinOptions {/a\    allWarningsAsErrors = false' "$PLUGIN_BUILD_FILE"
+            fi
+
+            echo "Patched successfully"
+            grep -A 5 "kotlinOptions" "$PLUGIN_BUILD_FILE" || true
+          fi
+
+      # Add Gradle property to disable Kotlin warnings as errors globally
+      - name: Configure Gradle Properties for CI
+        run: |
+          cat >> android/gradle.properties << 'EOF'
+
+          # CI: Disable Kotlin warnings as errors
+          kotlin.allWarningsAsErrors=false
+          kotlin.suppressWarnings=true
+
+          # Gradle performance settings for CI
+          org.gradle.daemon=false
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          org.gradle.configureondemand=true
+          EOF
+
+      # Build Android Release APK
       - name: Build Android Release APK
         run: |
           cd android
 
-          # Add Gradle properties to skip React Native tasks since bundle is pre-built
-          cat >> gradle.properties << EOF
-
-          # CI: Skip React Native bundle task (already built)
-          bundleInRelease=false
-          bundleInDebug=false
-          devDisabledInRelease=true
-          EOF
-
           # Clean first
           ./gradlew clean
 
-          # Build release APK, excluding the Kotlin plugin compilation
-          # Since JS bundle is already built, we skip React Native Gradle plugin tasks
+          # Build release APK with Kotlin compiler args to suppress warnings
           ./gradlew assembleRelease \
-            -x :gradle-plugin:react-native-gradle-plugin:compileKotlin \
-            -x :gradle-plugin:react-native-gradle-plugin:compileJava \
-            --stacktrace
+            --stacktrace \
+            -Dkotlin.compiler.execution.strategy=in-process \
+            -Pkotlin.allWarningsAsErrors=false
 
       # Rename APK with version
       - name: Rename APK with version
