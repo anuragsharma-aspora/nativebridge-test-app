@@ -122,12 +122,24 @@ jobs:
         run: |
           cd android
 
+          # Add Gradle properties to skip React Native tasks since bundle is pre-built
+          cat >> gradle.properties << EOF
+
+          # CI: Skip React Native bundle task (already built)
+          bundleInRelease=false
+          bundleInDebug=false
+          devDisabledInRelease=true
+          EOF
+
           # Clean first
           ./gradlew clean
 
-          # Build release APK
-          # The JS bundle is already built, so we just need to assemble the APK
-          ./gradlew assembleRelease --stacktrace --info
+          # Build release APK, excluding the Kotlin plugin compilation
+          # Since JS bundle is already built, we skip React Native Gradle plugin tasks
+          ./gradlew assembleRelease \
+            -x :gradle-plugin:react-native-gradle-plugin:compileKotlin \
+            -x :gradle-plugin:react-native-gradle-plugin:compileJava \
+            --stacktrace
 
       # Rename APK with version
       - name: Rename APK with version
