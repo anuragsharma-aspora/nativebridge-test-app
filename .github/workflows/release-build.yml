@@ -17,6 +17,11 @@ jobs:
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
+    outputs:
+      nativebridge_link: ${{ steps.nativebridge_upload.outputs.magic_link }}
+      nativebridge_versioned_link: ${{ steps.nativebridge_upload.outputs.versioned_link }}
+      nativebridge_version: ${{ steps.nativebridge_upload.outputs.nb_version }}
+      nativebridge_app_id: ${{ steps.nativebridge_upload.outputs.app_id }}
 
     steps:
       # Checkout code
@@ -196,6 +201,68 @@ jobs:
           path: release-artifacts/NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk
           retention-days: 90
 
+      # Upload to NativeBridge Platform
+      - name: Upload APK to NativeBridge
+        id: nativebridge_upload
+        env:
+          NATIVEBRIDGE_API_KEY: ${{ secrets.NATIVEBRIDGE_API_KEY }}
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          APK_PATH="release-artifacts/NativeBridge-v${VERSION}.apk"
+
+          if [ -z "$NATIVEBRIDGE_API_KEY" ]; then
+            echo "⚠️  NATIVEBRIDGE_API_KEY secret not configured - skipping NativeBridge upload"
+            echo "To enable NativeBridge uploads, add NATIVEBRIDGE_API_KEY to GitHub Secrets"
+            exit 0
+          fi
+
+          echo "📤 Uploading APK to NativeBridge..."
+
+          # Upload to NativeBridge API
+          RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+            -H "X-Api-Key: $NATIVEBRIDGE_API_KEY" \
+            -F "file=@$APK_PATH" \
+            -F "accessType=public" \
+            -F "versionAction=create_new_version" \
+            -F "sendNotification=true" \
+            -w "\n%{http_code}" \
+            -s)
+
+          # Extract HTTP status code
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "✅ Successfully uploaded to NativeBridge!"
+
+            # Parse response using grep and sed
+            MAGIC_LINK=$(echo "$BODY" | grep -o '"magicLink":"[^"]*"' | sed 's/"magicLink":"//;s/"//')
+            VERSIONED_LINK=$(echo "$BODY" | grep -o '"versionedMagicLink":"[^"]*"' | sed 's/"versionedMagicLink":"//;s/"//')
+            NB_VERSION=$(echo "$BODY" | grep -o '"version":"[^"]*"' | sed 's/"version":"//;s/"//')
+            APP_ID=$(echo "$BODY" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"//')
+
+            echo "📱 App ID: $APP_ID"
+            echo "🔢 NativeBridge Version: $NB_VERSION"
+            echo "🔗 Magic Link (Latest): $MAGIC_LINK"
+            echo "🔗 Versioned Link: $VERSIONED_LINK"
+
+            # Save to environment for later steps
+            echo "NATIVEBRIDGE_LINK=$MAGIC_LINK" >> $GITHUB_ENV
+            echo "NATIVEBRIDGE_VERSIONED_LINK=$VERSIONED_LINK" >> $GITHUB_ENV
+            echo "NATIVEBRIDGE_VERSION=$NB_VERSION" >> $GITHUB_ENV
+            echo "NATIVEBRIDGE_APP_ID=$APP_ID" >> $GITHUB_ENV
+
+            # Set outputs for create-release job
+            echo "magic_link=$MAGIC_LINK" >> $GITHUB_OUTPUT
+            echo "versioned_link=$VERSIONED_LINK" >> $GITHUB_OUTPUT
+            echo "nb_version=$NB_VERSION" >> $GITHUB_OUTPUT
+            echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to upload to NativeBridge (HTTP $HTTP_CODE)"
+            echo "$BODY"
+            exit 1
+          fi
+
       # Output build info
       - name: Build Summary
         run: |
@@ -204,6 +271,17 @@ jobs:
           echo "**Version:** ${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "**APK:** NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk" >> $GITHUB_STEP_SUMMARY
           echo "**Size:** ${{ env.APK_SIZE }}" >> $GITHUB_STEP_SUMMARY
+
+          # Add NativeBridge info if uploaded
+          if [ -n "${{ env.NATIVEBRIDGE_LINK }}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📱 NativeBridge Upload ✅" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**App ID:** ${{ env.NATIVEBRIDGE_APP_ID }}" >> $GITHUB_STEP_SUMMARY
+            echo "**NativeBridge Version:** ${{ env.NATIVEBRIDGE_VERSION }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Magic Link (Latest):** [${{ env.NATIVEBRIDGE_LINK }}](${{ env.NATIVEBRIDGE_LINK }})" >> $GITHUB_STEP_SUMMARY
+            echo "**Versioned Link:** [${{ env.NATIVEBRIDGE_VERSIONED_LINK }}](${{ env.NATIVEBRIDGE_VERSIONED_LINK }})" >> $GITHUB_STEP_SUMMARY
+          fi
 
   # ============================================================================
   # Create GitHub Release
@@ -246,17 +324,79 @@ jobs:
           body: |
             ## NativeBridge Release ${{ steps.get_version.outputs.VERSION }}
 
-            ### 📦 Downloads
+            ### 🚀 Quick Test via NativeBridge Cloud
 
-            **Android:**
+            **Run this app instantly in the cloud** - No installation required!
+
+            **☁️ [Launch App in NativeBridge Cloud](${{ needs.build-android.outputs.nativebridge_versioned_link }})**
+
+            #### What is NativeBridge?
+
+            NativeBridge lets you **run Android apps instantly in your browser** using:
+            - ☁️ **Cloud Emulators** - Test on virtual Android devices
+            - 📱 **Real Physical Devices** - Run on actual Android hardware in the cloud
+            - 🚀 **One-Click Launch** - No setup, no installation, just click and test
+            - 🌐 **Any Platform** - Works on Windows, Mac, Linux, even mobile browsers
+
+            #### How to Use:
+            1. **Click the NativeBridge link above**
+            2. **Choose your test environment:**
+               - Cloud emulator (instant, free)
+               - Real physical device (actual hardware)
+            3. **App launches automatically** in the cloud
+            4. **Test and interact** directly in your browser
+            5. **Share the link** with your team for instant testing
+
+            > 💡 **No Downloads Needed:** Test the app without downloading or installing anything!
+            >
+            > 🔗 **Permanent Link:** This link points to **version ${{ steps.get_version.outputs.VERSION }}** specifically and will always remain available.
+
+            ---
+
+            ### 📦 Alternative: Download & Install
+
+            Want to install on your physical device instead?
+
+            **📱 [Download APK from NativeBridge](${{ needs.build-android.outputs.nativebridge_versioned_link }})**
+
+            ---
+
+            ### 📦 Manual Downloads
+
+            **Download APK from GitHub:**
             - `NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk` - Production APK for Android devices and emulators
 
-            ### 📝 Installation
+            ### 📝 Installation Methods
 
-            **Android:**
+            #### Method 1: NativeBridge Platform (Recommended)
+            ```
+            1. Open NativeBridge link on your Android device
+            2. Download and install directly
+            3. No computer or ADB required!
+            ```
+
+            #### Method 2: ADB Installation
             ```bash
+            # Download APK from GitHub Release
+            # Then install via ADB
             adb install NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk
             ```
+
+            #### Method 3: Manual Transfer
+            ```
+            1. Download APK from GitHub Release
+            2. Transfer to your Android device (USB/Email/Cloud)
+            3. Open APK file on device
+            4. Allow installation from unknown sources
+            5. Install
+            ```
+
+            ### 🔗 NativeBridge Links
+
+            - **Latest Version:** [${{ needs.build-android.outputs.nativebridge_link }}](${{ needs.build-android.outputs.nativebridge_link }}) (always points to newest version)
+            - **This Version (v${{ steps.get_version.outputs.VERSION }}):** [${{ needs.build-android.outputs.nativebridge_versioned_link }}](${{ needs.build-android.outputs.nativebridge_versioned_link }}) (permanent link to this specific version)
+            - **App ID:** `${{ needs.build-android.outputs.nativebridge_app_id }}`
+            - **NativeBridge Version:** `${{ needs.build-android.outputs.nativebridge_version }}`
 
             ### ✨ Features
             - UI Components testing
@@ -270,13 +410,14 @@ jobs:
             - Comprehensive logging
 
             ### 📋 Build Information
+            - **APK Version:** ${{ steps.get_version.outputs.VERSION }}
             - **Built on:** ${{ github.event.repository.updated_at }}
             - **Commit:** ${{ github.sha }}
             - **Tag:** ${{ steps.get_version.outputs.TAG_NAME }}
 
             ---
 
-            For detailed build instructions, see [BUILD_GUIDE.md](https://github.com/${{ github.repository }}/blob/main/BUILD_GUIDE.md)
+            **For detailed build instructions, see [BUILD_GUIDE.md](https://github.com/${{ github.repository }}/blob/main/BUILD_GUIDE.md)**
           files: |
             artifacts/NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk
         env:
