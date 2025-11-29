@@ -53,7 +53,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      # Decode and setup keystore from secrets
+      # Generate or decode keystore
       - name: Setup Android Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -64,17 +64,35 @@ jobs:
           # Create keystore directory
           mkdir -p android/app
 
-          # If keystore secret exists, decode it; otherwise use local keystore
+          # If keystore secret exists, decode it; otherwise generate a new one
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "Using keystore from GitHub Secrets"
             echo $KEYSTORE_BASE64 | base64 -d > android/app/release.keystore
             KEYSTORE_FILE="release.keystore"
+            KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD}"
+            KEY_ALIAS="${KEY_ALIAS}"
+            KEY_PASSWORD="${KEY_PASSWORD}"
           else
-            echo "Using local keystore (development)"
-            KEYSTORE_FILE="nativebridge-release.keystore"
+            echo "No keystore secrets found - generating a new keystore for CI"
+            KEYSTORE_FILE="ci-release.keystore"
             KEYSTORE_PASSWORD="nativebridge2025"
             KEY_ALIAS="nativebridge-key"
             KEY_PASSWORD="nativebridge2025"
+
+            # Generate keystore
+            keytool -genkeypair \
+              -v \
+              -storetype PKCS12 \
+              -keystore android/app/$KEYSTORE_FILE \
+              -alias $KEY_ALIAS \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass $KEYSTORE_PASSWORD \
+              -keypass $KEY_PASSWORD \
+              -dname "CN=NativeBridge CI, OU=Development, O=NativeBridge, L=City, ST=State, C=US"
+
+            echo "✅ Generated new keystore for CI build"
           fi
 
           # Create gradle.properties with signing config
@@ -82,10 +100,12 @@ jobs:
 
           # Release signing configuration (from CI/CD)
           MYAPP_RELEASE_STORE_FILE=$KEYSTORE_FILE
-          MYAPP_RELEASE_KEY_ALIAS=${KEY_ALIAS:-nativebridge-key}
-          MYAPP_RELEASE_STORE_PASSWORD=${KEYSTORE_PASSWORD:-nativebridge2025}
-          MYAPP_RELEASE_KEY_PASSWORD=${KEY_PASSWORD:-nativebridge2025}
+          MYAPP_RELEASE_KEY_ALIAS=$KEY_ALIAS
+          MYAPP_RELEASE_STORE_PASSWORD=$KEYSTORE_PASSWORD
+          MYAPP_RELEASE_KEY_PASSWORD=$KEY_PASSWORD
           EOF
+
+          echo "✅ Keystore configured successfully"
 
       # Update version in build.gradle
       - name: Update version in build.gradle
