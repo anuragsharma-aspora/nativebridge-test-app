@@ -98,8 +98,9 @@ jobs:
           # Clean build directory
           rm -rf build
 
-          # Build for simulator
-          # Use generic destination - will build for any iOS simulator
+          # Build for simulator (arm64 only for Apple Silicon)
+          # Building only arm64 reduces resource usage by ~50%
+          # This is sufficient for modern iOS simulators (M1/M2/M3 Macs)
           echo "Building with: $PROJECT_TYPE -scheme $SCHEME"
           xcodebuild \
             $PROJECT_TYPE \
@@ -107,7 +108,9 @@ jobs:
             -configuration Release \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
+            -arch arm64 \
             -derivedDataPath build \
+            ONLY_ACTIVE_ARCH=NO \
             MARKETING_VERSION=$VERSION \
             clean build
 
