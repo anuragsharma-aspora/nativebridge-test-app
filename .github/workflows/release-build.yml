@@ -219,7 +219,7 @@ jobs:
           echo "📤 Uploading APK to NativeBridge..."
 
           # Upload to NativeBridge API
-          RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+          RESPONSE=$(curl -X POST https://api.nativebridge.io/v1/application \
             -H "X-Api-Key: $NATIVEBRIDGE_API_KEY" \
             -F "file=@$APK_PATH" \
             -F "accessType=public" \
@@ -423,7 +423,7 @@ jobs:
           echo "📤 Uploading iOS app to NativeBridge..."
 
           # Upload to NativeBridge API
-          RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+          RESPONSE=$(curl -X POST https://api.nativebridge.io/v1/application \
             -H "X-Api-Key: $NATIVEBRIDGE_API_KEY" \
             -F "file=@$APP_PATH" \
             -F "accessType=public" \
