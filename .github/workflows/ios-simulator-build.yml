@@ -1,0 +1,196 @@
+name: iOS Simulator Build (Test)
+
+# Test workflow for iOS simulator builds
+# Trigger manually for testing
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+  push:
+    branches:
+      - test-ios-build  # Only triggers on this test branch
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  build-ios-simulator:
+    name: Build iOS Simulator App
+    runs-on: macos-latest
+
+    steps:
+      # Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Get version from input or use default
+      - name: Set version
+        id: get_version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="1.0.0"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building iOS version: $VERSION"
+
+      # Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      # Install dependencies
+      - name: Install npm dependencies
+        run: npm ci
+
+      # Install iOS dependencies (CocoaPods)
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          # Update CocoaPods repo
+          pod repo update
+          # Install pods
+          pod install --repo-update
+
+      # Set up Xcode version
+      - name: Set up Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      # Build iOS .app for simulator
+      - name: Build iOS .app for Simulator
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+
+          echo "📱 Building iOS app for simulator..."
+          echo "Version: $VERSION"
+
+          cd ios
+
+          # Find the workspace or project file
+          if [ -f "NativeBridgeDebugApplication.xcworkspace" ]; then
+            PROJECT_TYPE="-workspace NativeBridgeDebugApplication.xcworkspace"
+            echo "Using workspace"
+          elif [ -f "NativeBridgeDebugApplication.xcodeproj" ]; then
+            PROJECT_TYPE="-project NativeBridgeDebugApplication.xcodeproj"
+            echo "Using project"
+          else
+            echo "❌ Error: No workspace or project found"
+            exit 1
+          fi
+
+          # Clean build directory
+          rm -rf build
+
+          # Build for simulator
+          xcodebuild \
+            $PROJECT_TYPE \
+            -scheme NativeBridgeDebugApplication \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -derivedDataPath build \
+            MARKETING_VERSION=$VERSION \
+            clean build
+
+          echo "✅ iOS build completed"
+
+      # Find and verify .app directory
+      - name: Locate .app directory
+        id: find_app
+        run: |
+          cd ios
+
+          # Find the .app directory
+          APP_PATH=$(find build/Build/Products/Release-iphonesimulator -name "*.app" -type d | head -n 1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ Error: .app directory not found"
+            echo "Searching in:"
+            find build -type d -name "*.app" || true
+            exit 1
+          fi
+
+          echo "Found .app at: $APP_PATH"
+          APP_NAME=$(basename "$APP_PATH")
+          echo "App name: $APP_NAME"
+
+          # Get app size
+          APP_SIZE=$(du -sh "$APP_PATH" | cut -f1)
+          echo "App size: $APP_SIZE"
+
+          # Save paths
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_OUTPUT
+          echo "APP_NAME=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "APP_SIZE=$APP_SIZE" >> $GITHUB_OUTPUT
+
+      # Create zip of .app directory
+      - name: Create .app.zip archive
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          APP_PATH=${{ steps.find_app.outputs.APP_PATH }}
+          APP_NAME=${{ steps.find_app.outputs.APP_NAME }}
+
+          echo "📦 Creating zip archive..."
+
+          # Create release artifacts directory
+          mkdir -p release-artifacts
+
+          # Create zip (cd to directory first to avoid including full path)
+          cd $(dirname "$APP_PATH")
+          zip -r -y "../../../../../release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip" "$APP_NAME"
+          cd -
+
+          # Verify zip was created
+          if [ -f "release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip" ]; then
+            ZIP_SIZE=$(ls -lh "release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip" | awk '{print $5}')
+            echo "✅ Zip created successfully"
+            echo "📊 Zip size: $ZIP_SIZE"
+            echo "ZIP_SIZE=$ZIP_SIZE" >> $GITHUB_ENV
+          else
+            echo "❌ Failed to create zip"
+            exit 1
+          fi
+
+      # Upload .app.zip as artifact
+      - name: Upload iOS .app.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: NativeBridge-iOS-Simulator-v${{ steps.get_version.outputs.VERSION }}
+          path: release-artifacts/NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip
+          retention-days: 90
+
+      # Output build summary
+      - name: Build Summary
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          APP_NAME=${{ steps.find_app.outputs.APP_NAME }}
+          APP_SIZE=${{ steps.find_app.outputs.APP_SIZE }}
+
+          echo "### iOS Simulator Build Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "**App Name:** $APP_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "**App Size:** $APP_SIZE" >> $GITHUB_STEP_SUMMARY
+          echo "**Zip Size:** ${{ env.ZIP_SIZE }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Archive:** NativeBridge-iOS-v${VERSION}.app.zip" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 Installation Instructions" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# 1. Download and extract the zip" >> $GITHUB_STEP_SUMMARY
+          echo "unzip NativeBridge-iOS-v${VERSION}.app.zip" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 2. Install to running simulator" >> $GITHUB_STEP_SUMMARY
+          echo "xcrun simctl install booted ${APP_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 3. Launch the app" >> $GITHUB_STEP_SUMMARY
+          echo "xcrun simctl launch booted <bundle-identifier>" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
