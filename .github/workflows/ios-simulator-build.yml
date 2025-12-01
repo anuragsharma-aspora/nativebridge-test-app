@@ -74,15 +74,24 @@ jobs:
 
           cd ios
 
+          # List files for debugging
+          echo "Files in ios directory:"
+          ls -la | grep -E "\.xcworkspace|\.xcodeproj" || echo "No .xcworkspace or .xcodeproj found"
+
           # Find the workspace or project file
-          if [ -f "NativeBridgeDebugApplication.xcworkspace" ]; then
-            PROJECT_TYPE="-workspace NativeBridgeDebugApplication.xcworkspace"
-            echo "Using workspace"
-          elif [ -f "NativeBridgeDebugApplication.xcodeproj" ]; then
-            PROJECT_TYPE="-project NativeBridgeDebugApplication.xcodeproj"
-            echo "Using project"
+          # After pod install, workspace should exist
+          if [ -d "NativeBridgeApp.xcworkspace" ]; then
+            PROJECT_TYPE="-workspace NativeBridgeApp.xcworkspace"
+            SCHEME="NativeBridgeApp"
+            echo "✅ Using workspace: NativeBridgeApp.xcworkspace"
+          elif [ -d "NativeBridgeApp.xcodeproj" ]; then
+            PROJECT_TYPE="-project NativeBridgeApp.xcodeproj"
+            SCHEME="NativeBridgeApp"
+            echo "✅ Using project: NativeBridgeApp.xcodeproj"
           else
             echo "❌ Error: No workspace or project found"
+            echo "Contents of ios directory:"
+            ls -la
             exit 1
           fi
 
@@ -90,9 +99,10 @@ jobs:
           rm -rf build
 
           # Build for simulator
+          echo "Building with: $PROJECT_TYPE -scheme $SCHEME"
           xcodebuild \
             $PROJECT_TYPE \
-            -scheme NativeBridgeDebugApplication \
+            -scheme $SCHEME \
             -configuration Release \
             -sdk iphonesimulator \
             -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
