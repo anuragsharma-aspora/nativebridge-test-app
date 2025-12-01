@@ -284,11 +284,216 @@ jobs:
           fi
 
   # ============================================================================
+  # iOS Simulator Build (Uses Pre-built App)
+  # ============================================================================
+  build-ios:
+    name: Build iOS Simulator App
+    runs-on: macos-latest
+    outputs:
+      nativebridge_link: ${{ steps.nativebridge_upload.outputs.magic_link }}
+      nativebridge_versioned_link: ${{ steps.nativebridge_upload.outputs.versioned_link }}
+      nativebridge_version: ${{ steps.nativebridge_upload.outputs.nb_version }}
+      nativebridge_app_id: ${{ steps.nativebridge_upload.outputs.app_id }}
+
+    steps:
+      # Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Extract version from tag
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      # NOTE: iOS builds are very resource-intensive in CI/CD environments.
+      # Building React Native apps for both arm64 and x86_64 architectures can:
+      # - Take 10+ minutes on GitHub Actions runners
+      # - Consume significant CPU and memory
+      # - Often timeout or fail due to resource exhaustion
+      #
+      # SOLUTION: Use pre-built .app.zip files
+      # To create a new pre-built iOS app:
+      # 1. Build locally: cd ios && pod install && xcodebuild -workspace NativeBridgeApp.xcworkspace \
+      #    -scheme NativeBridgeApp -configuration Release -sdk iphonesimulator \
+      #    -destination 'generic/platform=iOS Simulator' -derivedDataPath build clean build
+      # 2. Zip the app: cd build/Build/Products/Release-iphonesimulator && \
+      #    zip -r -y ../../../../prebuilt/NativeBridgeApp.app.zip NativeBridgeApp.app
+      # 3. Commit: git add ios/prebuilt/NativeBridgeApp.app.zip && git commit -m "Update pre-built iOS app"
+      #
+      # This approach:
+      # ✅ Completes in seconds instead of minutes
+      # ✅ Uses minimal CI resources
+      # ✅ Avoids architecture-specific build issues
+      # ✅ Still provides instant cloud testing via NativeBridge
+
+      # Uncomment below to enable actual iOS building (requires significant CI resources)
+      # - name: Set up Node.js
+      #   uses: actions/setup-node@v4
+      #   with:
+      #     node-version: ${{ env.NODE_VERSION }}
+      #     cache: 'npm'
+      #
+      # - name: Install npm dependencies
+      #   run: npm ci
+      #
+      # - name: Install CocoaPods dependencies
+      #   run: |
+      #     cd ios
+      #     pod repo update
+      #     pod install --repo-update
+      #
+      # - name: Set up Xcode
+      #   run: |
+      #     sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+      #     xcodebuild -version
+      #
+      # - name: Build iOS .app for Simulator
+      #   run: |
+      #     VERSION=${{ steps.get_version.outputs.VERSION }}
+      #     cd ios
+      #     xcodebuild \
+      #       -workspace NativeBridgeApp.xcworkspace \
+      #       -scheme NativeBridgeApp \
+      #       -configuration Release \
+      #       -sdk iphonesimulator \
+      #       -destination 'generic/platform=iOS Simulator' \
+      #       -derivedDataPath build \
+      #       MARKETING_VERSION=$VERSION \
+      #       clean build
+      #
+      #     # Create zip
+      #     cd build/Build/Products/Release-iphonesimulator
+      #     mkdir -p ../../../../release-artifacts
+      #     zip -r -y ../../../../release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip NativeBridgeApp.app
+
+      # Use pre-built iOS app (much faster and more reliable)
+      - name: Use Pre-built iOS App
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+
+          echo "📱 Using pre-built iOS app..."
+
+          # Check if pre-built app exists
+          if [ ! -f "ios/prebuilt/NativeBridgeApp.app.zip" ]; then
+            echo "❌ Pre-built iOS app not found at ios/prebuilt/NativeBridgeApp.app.zip"
+            echo "Please build the app locally and commit the zip file. See comments above for instructions."
+            exit 1
+          fi
+
+          # Create release artifacts directory
+          mkdir -p release-artifacts
+
+          # Copy pre-built app to release artifacts with versioned name
+          cp ios/prebuilt/NativeBridgeApp.app.zip release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip
+
+          # Get file size
+          ZIP_SIZE=$(ls -lh release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip | awk '{print $5}')
+          echo "ZIP_SIZE=$ZIP_SIZE" >> $GITHUB_ENV
+
+          echo "✅ Pre-built iOS app ready: NativeBridge-iOS-v${VERSION}.app.zip ($ZIP_SIZE)"
+
+      # Upload as artifact
+      - name: Upload iOS .app.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}
+          path: release-artifacts/NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip
+          retention-days: 90
+
+      # Upload to NativeBridge Platform
+      - name: Upload iOS app to NativeBridge
+        id: nativebridge_upload
+        env:
+          NATIVEBRIDGE_API_KEY: ${{ secrets.NATIVEBRIDGE_API_KEY }}
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          APP_PATH="release-artifacts/NativeBridge-iOS-v${VERSION}.app.zip"
+
+          if [ -z "$NATIVEBRIDGE_API_KEY" ]; then
+            echo "⚠️  NATIVEBRIDGE_API_KEY secret not configured - skipping NativeBridge upload"
+            echo "To enable NativeBridge uploads, add NATIVEBRIDGE_API_KEY to GitHub Secrets"
+            exit 0
+          fi
+
+          echo "📤 Uploading iOS app to NativeBridge..."
+
+          # Upload to NativeBridge API
+          RESPONSE=$(curl -X POST https://dev.api.nativebridge.io/v1/application \
+            -H "X-Api-Key: $NATIVEBRIDGE_API_KEY" \
+            -F "file=@$APP_PATH" \
+            -F "accessType=public" \
+            -F "versionAction=create_new_version" \
+            -F "sendNotification=true" \
+            -w "\n%{http_code}" \
+            -s)
+
+          # Extract HTTP status code
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "✅ Successfully uploaded to NativeBridge!"
+
+            # Parse response
+            MAGIC_LINK=$(echo "$BODY" | grep -o '"magicLink":"[^"]*"' | sed 's/"magicLink":"//;s/"//')
+            VERSIONED_LINK=$(echo "$BODY" | grep -o '"versionedMagicLink":"[^"]*"' | sed 's/"versionedMagicLink":"//;s/"//')
+            NB_VERSION=$(echo "$BODY" | grep -o '"version":"[^"]*"' | sed 's/"version":"//;s/"//')
+            APP_ID=$(echo "$BODY" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"//')
+
+            echo "📱 App ID: $APP_ID"
+            echo "🔢 NativeBridge Version: $NB_VERSION"
+            echo "🔗 Magic Link (Latest): $MAGIC_LINK"
+            echo "🔗 Versioned Link: $VERSIONED_LINK"
+
+            # Save to environment
+            echo "NATIVEBRIDGE_LINK=$MAGIC_LINK" >> $GITHUB_ENV
+            echo "NATIVEBRIDGE_VERSIONED_LINK=$VERSIONED_LINK" >> $GITHUB_ENV
+            echo "NATIVEBRIDGE_VERSION=$NB_VERSION" >> $GITHUB_ENV
+            echo "NATIVEBRIDGE_APP_ID=$APP_ID" >> $GITHUB_ENV
+
+            # Set outputs
+            echo "magic_link=$MAGIC_LINK" >> $GITHUB_OUTPUT
+            echo "versioned_link=$VERSIONED_LINK" >> $GITHUB_OUTPUT
+            echo "nb_version=$NB_VERSION" >> $GITHUB_OUTPUT
+            echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to upload to NativeBridge (HTTP $HTTP_CODE)"
+            echo "$BODY"
+            exit 1
+          fi
+
+      # Output build info
+      - name: Build Summary
+        run: |
+          echo "### iOS Build Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**App:** NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** ${{ env.ZIP_SIZE }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Using pre-built iOS app for faster CI/CD" >> $GITHUB_STEP_SUMMARY
+
+          # Add NativeBridge info if uploaded
+          if [ -n "${{ env.NATIVEBRIDGE_LINK }}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📱 NativeBridge Upload ✅" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**App ID:** ${{ env.NATIVEBRIDGE_APP_ID }}" >> $GITHUB_STEP_SUMMARY
+            echo "**NativeBridge Version:** ${{ env.NATIVEBRIDGE_VERSION }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Magic Link (Latest):** [${{ env.NATIVEBRIDGE_LINK }}](${{ env.NATIVEBRIDGE_LINK }})" >> $GITHUB_STEP_SUMMARY
+            echo "**Versioned Link:** [${{ env.NATIVEBRIDGE_VERSIONED_LINK }}](${{ env.NATIVEBRIDGE_VERSIONED_LINK }})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
   # Create GitHub Release
   # ============================================================================
   create-release:
     name: Create GitHub Release
-    needs: [build-android]
+    needs: [build-android, build-ios]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -314,6 +519,13 @@ jobs:
           name: NativeBridge-Android-v${{ steps.get_version.outputs.VERSION }}
           path: artifacts/
 
+      # Download iOS artifact
+      - name: Download iOS .app.zip
+        uses: actions/download-artifact@v4
+        with:
+          name: NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}
+          path: artifacts/
+
       # Create GitHub Release
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -328,7 +540,9 @@ jobs:
 
             **Run this app instantly in the cloud** - No installation required!
 
-            **☁️ [Launch App in NativeBridge Cloud](${{ needs.build-android.outputs.nativebridge_versioned_link }})**
+            **☁️ Android: [Launch in NativeBridge Cloud](${{ needs.build-android.outputs.nativebridge_versioned_link }})**
+
+            **☁️ iOS: [Launch in NativeBridge Cloud](${{ needs.build-ios.outputs.nativebridge_versioned_link }})**
 
             #### What is NativeBridge?
 
@@ -363,8 +577,9 @@ jobs:
 
             ### 📦 Manual Downloads
 
-            **Download APK from GitHub:**
-            - `NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk` - Production APK for Android devices and emulators
+            **Download from GitHub:**
+            - `NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk` - Android APK for devices and emulators
+            - `NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip` - iOS Simulator app
 
             ### 📝 Installation Methods
 
@@ -393,10 +608,17 @@ jobs:
 
             ### 🔗 NativeBridge Links
 
+            **Android:**
             - **Latest Version:** [${{ needs.build-android.outputs.nativebridge_link }}](${{ needs.build-android.outputs.nativebridge_link }}) (always points to newest version)
-            - **This Version (v${{ steps.get_version.outputs.VERSION }}):** [${{ needs.build-android.outputs.nativebridge_versioned_link }}](${{ needs.build-android.outputs.nativebridge_versioned_link }}) (permanent link to this specific version)
+            - **This Version (v${{ steps.get_version.outputs.VERSION }}):** [${{ needs.build-android.outputs.nativebridge_versioned_link }}](${{ needs.build-android.outputs.nativebridge_versioned_link }}) (permanent link)
             - **App ID:** `${{ needs.build-android.outputs.nativebridge_app_id }}`
             - **NativeBridge Version:** `${{ needs.build-android.outputs.nativebridge_version }}`
+
+            **iOS:**
+            - **Latest Version:** [${{ needs.build-ios.outputs.nativebridge_link }}](${{ needs.build-ios.outputs.nativebridge_link }}) (always points to newest version)
+            - **This Version (v${{ steps.get_version.outputs.VERSION }}):** [${{ needs.build-ios.outputs.nativebridge_versioned_link }}](${{ needs.build-ios.outputs.nativebridge_versioned_link }}) (permanent link)
+            - **App ID:** `${{ needs.build-ios.outputs.nativebridge_app_id }}`
+            - **NativeBridge Version:** `${{ needs.build-ios.outputs.nativebridge_version }}`
 
             ### ✨ Features
             - UI Components testing
@@ -420,6 +642,7 @@ jobs:
             **For detailed build instructions, see [BUILD_GUIDE.md](https://github.com/${{ github.repository }}/blob/main/BUILD_GUIDE.md)**
           files: |
             artifacts/NativeBridge-v${{ steps.get_version.outputs.VERSION }}.apk
+            artifacts/NativeBridge-iOS-v${{ steps.get_version.outputs.VERSION }}.app.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -433,5 +656,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Artifacts:**" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Android APK" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ iOS .app.zip" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release URL:** https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_version.outputs.TAG_NAME }}" >> $GITHUB_STEP_SUMMARY
