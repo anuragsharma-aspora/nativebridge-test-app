@@ -99,13 +99,14 @@ jobs:
           rm -rf build
 
           # Build for simulator
+          # Use generic destination - will build for any iOS simulator
           echo "Building with: $PROJECT_TYPE -scheme $SCHEME"
           xcodebuild \
             $PROJECT_TYPE \
             -scheme $SCHEME \
             -configuration Release \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
             MARKETING_VERSION=$VERSION \
             clean build
